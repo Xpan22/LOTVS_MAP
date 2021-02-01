@@ -1,0 +1,118 @@
+---
+title: "LOTVS MAP"
+author: "Manuele Bazzichetto"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## This is the R code used to produce the map of the [LOTVS database](https://lotvs.enraizandolanube.com/)
+
+The LOTVS (LOng-Term Vegetation Sampling) database is a collection of vegetation data using permanent plots worldwide. At present the database includes vegetation data from 80 study areas covering grasslands, shrublands and forest understory around the globe, with more that 8000 plots and data for ~4500 vascular plant species, sampled for at least for 6 years (with a range of 6 to 53 mostly on yearly basis).
+
+```{r, warning = FALSE}
+library(leaflet)
+library(leaflet.esri)
+library(leafem)
+library(rmapshaper)
+library(htmltools)
+library(htmlwidgets)
+library(sf)
+
+```
+
+```{r}
+#Load LOTVS points
+LOTVS_pts <- read.csv(file = "D:/WorldEcologicalLandUnits/LOTVS/Trial.csv", header = T, dec = ",", sep = ";")
+#Transform to spatial object
+LOTVS_spatial <- st_as_sf(x = LOTVS_pts, coords = c("long", "lat"))
+#Load biomes polygons
+Biomes <- st_read("D:/WorldEcologicalLandUnits/TerEcorTNC/Diss_fx_tnc_ecor.shp")
+
+#Set CRS
+st_crs(LOTVS_spatial) <- st_crs(Biomes)
+
+#Select only some cols of biomes
+Biomes <- Biomes[c("WWF_REALM", "WWF_MHTNAM")]
+
+#Simplify biomes
+Biomes_simplified <- rmapshaper::ms_simplify(input = Biomes)
+
+#Remove Antarctic - need tmap for that
+library(tmap)
+data("World")
+World_WGS <- st_transform(World, crs = 4326)
+Biomes_simplified <- st_crop(Biomes_simplified, st_bbox(World_WGS[World_WGS$continent != "Antarctica", ])) #check warning
+
+#compare sizes pre vs pst simplify
+object.size(Biomes); object.size(Biomes_simplified)
+
+#Colours for biomes
+palette_biomes <- c("Boreal Forests/Taiga" = "darkslategray3",
+                    "Deserts and Xeric Shrublands" = "darkgoldenrod1",
+                    "Flooded Grasslands and Savannas" = "darkorange",
+                    "Inland Water" = "cyan",
+                    "Mangroves" = "deeppink2",
+                    "Mediterranean Forests, Woodlands and Scrub" = "darkorange3",
+                    "Montane Grasslands and Shrublands" = "yellow",
+                    "Rock and Ice" = "cornsilk",
+                    "Temperate Broadleaf and Mixed Forests" = "darkolivegreen1",
+                    "Temperate Conifer Forests" = "deepskyblue4",
+                    "Temperate Grasslands, Savannas and Shrublands" = "darkkhaki",
+                    "Tropical and Subtropical Coniferous Forests" = "burlywood3",
+                    "Tropical and Subtropical Dry Broadleaf Forests" = "chartreuse4", #check here
+                    "Tropical and Subtropical Grasslands, Savannas and Shrublands" = "darkorange4",
+                    "Tropical and Subtropical Moist Broadleaf Forests" = "darkgreen",
+                    "Tundra" = "azure")
+
+palette_biomes.col <- unname(sapply(as.character(Biomes_simplified$WWF_MHTNAM), function(i, colori = palette_biomes) {
+  palette_biomes[i]
+}))
+
+#Create color palette for categorical data
+colors_biomes <- colorFactor(palette = palette_biomes.col, levels = Biomes_simplified$WWF_MHTNAM)
+
+#make LOTVS icon
+lotvsIcon <- makeIcon(
+  iconUrl = "C:/Users/Manuele/Desktop/LOTVS_off.png",
+  iconWidth = 50, iconHeight = 50,
+  iconAnchorX = 0, iconAnchorY = 0
+)
+
+#multiple layers can be assigned to the same group
+#layerID are unique
+LOTVS_database <- leaflet(data = Biomes_simplified) %>%
+  addEsriBasemapLayer(esriBasemapLayers$Imagery, group = "ESRI-Imagery", autoLabels = F) %>%
+  addEsriBasemapLayer(esriBasemapLayers$Streets, group = "ESRI-Streets") %>%
+  addPolygons(color = ~colors_biomes(WWF_MHTNAM), stroke = FALSE,
+              fillOpacity = 0.8, smoothFactor = 0.5, fillColor = 0,
+              group = "Biomes") %>%
+  addLegend(position = "bottomleft", pal = colors_biomes,
+            val = Biomes_simplified$WWF_MHTNAM,
+            title = "Biomes", opacity = 0.5) %>%
+  addMarkers(lng = st_coordinates(LOTVS_spatial)[, 1], lat = st_coordinates(LOTVS_spatial)[, 2],
+             clusterOptions = markerClusterOptions(),
+             icon = lotvsIcon, group = "Dataset") %>%
+  addLayersControl(baseGroups = c("ESRI-Imagery", "ESRI-Streets"),
+                   overlayGroups = c("Biomes", "Dataset"),
+                   position = "topright") %>%
+  setView(lat = 39.466667, lng = -0.375000, zoom = 1) %>%
+  leaflet.extras::addResetMapButton() %>%
+  addMiniMap(width = 100, height = 80) %>%
+  addLogo(img = "C:/Users/Manuele/Desktop/LOTVS_full.png",
+          src = "local", url = "https://lotvs.enraizandolanube.com/",
+          position = "topleft", height = 100, width = 300)
+#setMaxBounds(lng1 = -180.00000, lat1 = -55.61183, lng2 = 180.00000, lat2 = 83.62302) --> put it if you can manage to reduce the legend
+
+#show map
+LOTVS_database
+
+#save map
+#save_html(LOTVS_database, "LOTVS.html")
+
+#saveWidget(LOTVS_database, "LOTVS_wdgt.html")
+```
+
