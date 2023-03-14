@@ -1,0 +1,162 @@
+---
+title: "Map of the LOTVS collection"
+author: "created by Manuele Bazzichetto"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, out.width='40%', fig.align='left', echo=FALSE}
+knitr::include_graphics(path = "LOTVS.jpeg")
+```
+
+#### The [LOTVS (LOng-Term Vegetation Sampling) collection](https://lotvs.csic.es/) gathers time-series of vegetation data collected in permanent plots worldwide. Currently, LOTVS consists of 87 datasets including vegetation data from 125 geographic locations (reported on the map below). The most frequently represented habitats are: grasslands, mixed vegetation types (e.g. savannas, shrub steppes), shrublands and forest understory. 
+#### The collection includes ~11600 vegetation time-series (minimum time span: 6 years) and observations for more than 5000 vascular plant species.
+
+A full description of LOTVS can be found at [LOTVS: a global collection of permanent vegetation plots](https://doi.org/10.1101/2021.09.29.462383). 
+
+For inquiries about LOTVS, contact Francesco de Bello (`r c("francesco.bello@ext.uv.es")`).
+
+For information about the map, contact `r c("manuele.bazzichetto@gmail.com")`.
+
+The R code used to generate the map can be found [here](https://github.com/ManueleBazzichetto/LOTVS_MAP) as an .Rmd object that can be read in R.
+Last update: `r Sys.time()`. The map will be regularly updated.
+
+```{r, warning = FALSE, message = FALSE, include = FALSE}
+library(leaflet)
+library(leaflet.esri)
+library(leafem)
+library(rmapshaper)
+library(htmltools)
+library(htmlwidgets)
+library(sf)
+library(tmap) #to get World data
+library(raster)
+```
+
+```{r, warning = F, message = F, include = FALSE}
+#Load data on LOTVS datasets and locations
+load(file = "~/Documents/LOTVS_map/meta_4mapOK_v2.RData")
+#Load coordinates
+load(file = "~/Documents/LOTVS_map/LOTVS_coords_v2.RData")
+
+LOTVS_pts <- meta_4mapOK_v2
+rm(meta_4mapOK_v2)
+
+#Attach coordinates to the LOTVS dataframe (hereafter, df)
+#identical(LOTVS_loc_v2$Study.data.set, LOTVS_pts$Dataset) #T
+LOTVS_pts$long <- LOTVS_loc_v2$long
+LOTVS_pts$lat <- LOTVS_loc_v2$lat
+
+#Transform LOTVS df to a spatial object
+LOTVS_spatial <- st_as_sf(x = LOTVS_pts[!LOTVS_pts$Dataset %in% c("Dolezal", "Croche", "Hallett"), ], coords = c("long", "lat"))
+
+#Load shapefile (polygons) of biomes (see data source)
+Biomes <- st_read("~/Documents/LOTVS_map/Diss_fx_tnc_ecor.shp")
+
+#Set (geographic) CRS - WGS84 
+st_crs(LOTVS_spatial) <- st_crs(Biomes)
+
+#Subset the biomes (spatial) df
+Biomes <- Biomes[c("WWF_REALM", "WWF_MHTNAM")]
+
+#Simplify biomes
+Biomes_simplified <- rmapshaper::ms_simplify(input = Biomes)
+
+#Remove Antarctic
+data("World")
+
+#Work-around for: https://github.com/r-spatial/sf/issues/1759
+Biomes_simplified <- as(Biomes_simplified, "Spatial")
+
+Biomes_simplified <- raster::crop(Biomes_simplified, extent(as(World[World$continent != "Antarctica", ], "Spatial")))
+
+#Get back to an sf obj
+Biomes_simplified <- st_as_sf(Biomes_simplified)
+
+#Compare sizes objects pre vs post simplification
+#object.size(Biomes); object.size(Biomes_simplified)
+
+#Lookup table for biome-specific colours
+palette_biomes <- c("Boreal Forests/Taiga" = "darkslategray3",
+                    "Deserts and Xeric Shrublands" = "darkgoldenrod1",
+                    "Flooded Grasslands and Savannas" = "darkorange",
+                    "Inland Water" = "cyan",
+                    "Mangroves" = "deeppink2",
+                    "Mediterranean Forests, Woodlands and Scrub" = "darkorange3",
+                    "Montane Grasslands and Shrublands" = "yellow",
+                    "Rock and Ice" = "cornsilk",
+                    "Temperate Broadleaf and Mixed Forests" = "darkolivegreen1",
+                    "Temperate Conifer Forests" = "deepskyblue4",
+                    "Temperate Grasslands, Savannas and Shrublands" = "darkkhaki",
+                    "Tropical and Subtropical Coniferous Forests" = "burlywood3",
+                    "Tropical and Subtropical Dry Broadleaf Forests" = "chartreuse4", #check here
+                    "Tropical and Subtropical Grasslands, Savannas and Shrublands" = "darkorange4",
+                    "Tropical and Subtropical Moist Broadleaf Forests" = "darkgreen",
+                    "Tundra" = "azure")
+
+palette_biomes.col <- unname(palette_biomes[Biomes_simplified$WWF_MHTNAM])
+
+#Create color palette for categorical data (biomes)
+colors_biomes <- colorFactor(palette = palette_biomes.col, levels = Biomes_simplified$WWF_MHTNAM)
+
+#Create a LOTVS-like icon
+lotvsIcon <- makeIcon(
+  iconUrl = "~/Documents/LOTVS_map/LOTVS_off.png",
+  iconWidth = 50, iconHeight = 50,
+  iconAnchorX = 0, iconAnchorY = 0
+)
+
+#Multiple layers can be assigned to the same group
+#layerID(s) are unique
+LOTVS_collection <- leaflet(data = Biomes_simplified) %>%
+  addEsriBasemapLayer(esriBasemapLayers$Imagery, group = "ESRI-Imagery", autoLabels = F) %>%
+  addEsriBasemapLayer(esriBasemapLayers$Streets, group = "ESRI-Streets") %>%
+  addPolygons(color = ~colors_biomes(WWF_MHTNAM), stroke = FALSE,
+              fillOpacity = 0.6, smoothFactor = 0.5, fillColor = 0,
+              group = "Biomes") %>%
+  addLegend(position = "bottomleft", pal = colors_biomes,
+            values = Biomes_simplified$WWF_MHTNAM,
+            title = "Biomes", group = "Biomes", opacity = 0.5) %>%
+  addMarkers(data = LOTVS_spatial, lng = st_coordinates(LOTVS_spatial)[, 1], lat = st_coordinates(LOTVS_spatial)[, 2], 
+             clusterOptions = markerClusterOptions(),
+             icon = lotvsIcon, group = "Dataset", popup = ~paste0(
+               "<b>Name: </b>", LOTVS_spatial$New_Name,
+               "<br>", 
+               "<b>NumPlots: </b>", LOTVS_spatial$NPlots,
+               "<br>",
+               "<b>AvgNumYears: </b>", LOTVS_spatial$MeanNumYears,
+               "<br>",
+               "<b>DataType: </b>", LOTVS_spatial$Data_Type,
+               "<br>",
+               "<b>Accessibility: </b>", LOTVS_spatial$Accessibility)) %>%
+  addLayersControl(baseGroups = c("ESRI-Imagery", "ESRI-Streets"),
+                   overlayGroups = c("Biomes", "Dataset"),
+                   position = "topright") %>%
+  setView(lat = 39.466667, lng = -0.375000, zoom = 1)  %>%
+  addMiniMap(width = 100, height = 80) %>%
+  addFullscreenControl() %>%
+  addResetMapButton()
+
+#Save map
+#save_html(LOTVS_collection, "LOTVS.html")
+#saveWidget(LOTVS_collection, "LOTVS_wdgt.html")
+```
+
+#### Interact with the map.
+
+##### - Click on clusters to zoom-in up to a specific location.
+
+##### - Click on the markers (LOTVS icon) to get info on the datasets (notice that accessibility is coded as: O - open; R - restricted; PR - partly restricted. For more info on accessibility levels see [https://lotvs.csic.es/contribute/](https://lotvs.csic.es/contribute/)).
+
+##### - Full-screen view can be activated by clicking the full screen bottom (top-left corner of the map window).
+
+```{r, out.width = '100%', echo = FALSE}
+#Show the map
+LOTVS_collection
+```
+
+Data source: The map of the biomes was downloaded from [**https://rmgsc.cr.usgs.gov/outgoing/ecosystems/Global/**](https://rmgsc.cr.usgs.gov/outgoing/ecosystems/Global/) (accessed on January 11th, 2021).
