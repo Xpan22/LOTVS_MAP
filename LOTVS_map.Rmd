@@ -52,7 +52,7 @@ LOTVS_pts$long <- LOTVS_loc_v2$long
 LOTVS_pts$lat <- LOTVS_loc_v2$lat
 
 #Transform LOTVS df to a spatial object
-LOTVS_spatial <- st_as_sf(x = LOTVS_pts[!LOTVS_pts$Dataset %in% c("Dolezal", "Croche", "Hallett"), ], coords = c("long", "lat"))
+LOTVS_spatial <- st_as_sf(x = LOTVS_pts[!LOTVS_pts$Dataset %in% c("Hallett"), ], coords = c("long", "lat"))
 
 #Load shapefile (polygons) of biomes (see data source)
 Biomes <- st_read("~/Documents/LOTVS_map/Diss_fx_tnc_ecor.shp")
